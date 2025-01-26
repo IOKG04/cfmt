@@ -10,6 +10,9 @@ or lastly because you're using some types c doesn't understand (`u19`, `f128`, e
 That being said, this is not a drop in replacement, the format specifiers are a little different from c's.
 I did design them to be as close as possible though, requiring little rethinking if you're already used to c.
 
+A lot of what's written here isn't implemented yet, I am working on it though. <!-- TODO: remove once everything is implemented -->
+Also any ideas are appreciated, making this more feature rich would be nice :3
+
 ## Format specifier
 
 Format specifiers in `cfmt` look something like this:
@@ -53,7 +56,7 @@ The following specifiers exist:
 - `s`: String
 - `c`: Character
 - `p`: Pointer
-- `B`: Boolean (`"true"` or `"false"`)
+<!-- - `B`: Boolean (`"true"` or `"false"`) -->
 
 **Special:**
 <br/> \*cricket noises\*
@@ -79,14 +82,9 @@ What exactly *precision* means depends on the type to be formatted:
 
 If it's a floating point value, precision is the amount of digits after the decimal separator.
 
-If it's a string, precision defines the maximum amount of digits written.
-If more would be written, an error is returned.
-
-If it's a string, precision also defines the maximum amount of characters written,
-though in this case the string is truncated, no error is returned.
+If it's a string, precision defines the maximum amount of characters written.
 When truncation happens, the last characters are cut off.
 <!-- maybe making precision negative could make it truncate the first characters instead? -->
-<!-- maybe add a way to make it throw an error instead, maybe by putting a `!` after the `.` -->
 
 For any other type, precision doesn't do anything.
 
@@ -102,5 +100,6 @@ The following flags exist:
 - `-`: Allign to the left instead of right (space characters on the right)
 - `+`: Always write `+` and `-` sign for numeric types
 - ` `: (space) Write a space character at start of positive numeric values
+- `<`: Write sign before any padding
 - `0`: Pad with `0` characters instead of space characters
 <!-- `#`: Always write decimal separator for floating-point values -->

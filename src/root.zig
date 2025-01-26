@@ -11,6 +11,7 @@ pub const max_float_bitwidth = 64;
 pub const max_formatting_args = 32;
 
 const FmtInteger = std.meta.Int(.signed, max_integer_bitwidth);
+const FmtUnsignedInteger = std.meta.Int(.unsigned, max_float_bitwidth);
 const FmtFloat = std.meta.Float(max_float_bitwidth);
 
 /// TODO: copy description of how formats work here
@@ -74,6 +75,7 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
         var specifier: Specifier = .{
             .allign = .right,
             .sign = .negative_only,
+            .sign_position = .after_padding,
             .pad_char = ' ',
         };
 
@@ -83,6 +85,7 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
                 '-' => specifier.allign = .left,
                 '+' => specifier.sign = .always,
                 ' ' => specifier.sign = .force_space,
+                '<' => specifier.sign_position = .before_padding,
                 '0' => specifier.pad_char = '0',
                 else => break :flag_loop,
             }
@@ -90,8 +93,10 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
 
         // minimum_width
         if (fmt[i] == '*') {
-            std.debug.assert(args_array[arguments_read] == .usize_ptr);
-            specifier.minimum_width = args_array[arguments_read].usize_ptr.*;
+            std.debug.assert(arguments_read < args_array.len);
+            std.debug.assert(args_array[arguments_read] == .integer);
+            std.debug.assert(args_array[arguments_read].integer >= 0);
+            specifier.minimum_width = @intCast(args_array[arguments_read].integer);
             arguments_read += 1;
         }
         else if (std.ascii.isDigit(fmt[i])) {
@@ -106,8 +111,10 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
         if (fmt[i] == '.') {
             i += 1;
             if (fmt[i] == '*') {
-                std.debug.assert(args_array[arguments_read] == .usize_ptr);
-                specifier.precision = args_array[arguments_read].usize_ptr.*;
+                std.debug.assert(arguments_read < args_array.len);
+                std.debug.assert(args_array[arguments_read] == .integer);
+                std.debug.assert(args_array[arguments_read].integer >= 0);
+                specifier.minimum_width = @intCast(args_array[arguments_read].integer);
                 arguments_read += 1;
             }
             else if (std.ascii.isDigit(fmt[i])) {
@@ -126,41 +133,44 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
         // write contents
         switch (fmt[i]) {
             'i', 'd', 'u' => { // decimal integer
-                // TODO: add precision to this mess
+                std.debug.assert(arguments_read < args_array.len);
                 std.debug.assert(args_array[arguments_read] == .integer);
-                const val = args_array[arguments_read].integer;
-                const val_abs = @abs(val);
-                const val_digits: usize = @intCast(std.math.log10(val_abs) + 1);
-                const sign_char = specifier.getSign(val);
-                const int_length: usize = val_digits + @intFromBool(sign_char != null);
-                const padding_length: usize =
-                    if (specifier.minimum_width == 0) 0
-                    else if (int_length >= specifier.minimum_width) 0
-                    else specifier.minimum_width - int_length;
-
-                if (specifier.allign == .right) {
-                    try writer.writeByteNTimes(specifier.pad_char, padding_length);
-                    written_characters += padding_length;
-                }
-                if (sign_char) |sign| {
-                    try writer.writeByte(sign);
-                    written_characters += 1;
-                }
-                var digit = val_digits - 1;
-                var val_left = val;
-                while (true) {
-                    const base = std.math.pow(FmtInteger, 10, @intCast(digit));
-                    const multiplier: u8 = @intCast(@abs(@divTrunc(val_left, base)));
-                    try writer.writeByte('0' + multiplier);
-                    written_characters += 1;
-                    val_left = @mod(val_left, base);
-                    if (digit == 0) break;
-                    digit -= 1;
-                }
-                if (specifier.allign == .left) {
-                    try writer.writeByteNTimes(specifier.pad_char, padding_length);
-                    written_characters += padding_length;
-                }
+                const value = args_array[arguments_read].integer;
+                try formatInteger(writer, specifier, &written_characters, value, &[_]u8 {
+                    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+                });
+            },
+            'b' => { // binary integer
+                std.debug.assert(arguments_read < args_array.len);
+                std.debug.assert(args_array[arguments_read] == .integer);
+                const value = args_array[arguments_read].integer;
+                try formatInteger(writer, specifier, &written_characters, value, &[_]u8 {
+                    '0', '1',
+                });
+            },
+            'o' => { // octal integer
+                std.debug.assert(arguments_read < args_array.len);
+                std.debug.assert(args_array[arguments_read] == .integer);
+                const value = args_array[arguments_read].integer;
+                try formatInteger(writer, specifier, &written_characters, value, &[_]u8 {
+                    '0', '1', '2', '3', '4', '5', '6', '7',
+                });
+            },
+            'x' => { // hexadecimal integer (lowercase)
+                std.debug.assert(arguments_read < args_array.len);
+                std.debug.assert(args_array[arguments_read] == .integer);
+                const value = args_array[arguments_read].integer;
+                try formatInteger(writer, specifier, &written_characters, value, &[_]u8 {
+                    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+                });
+            },
+            'X' => { // hexadecimal integer (lowercase)
+                std.debug.assert(arguments_read < args_array.len);
+                std.debug.assert(args_array[arguments_read] == .integer);
+                const value = args_array[arguments_read].integer;
+                try formatInteger(writer, specifier, &written_characters, value, &[_]u8 {
+                    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
+                });
             },
             else => unreachable,
         }
@@ -168,9 +178,51 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
     }
 }
 
+fn formatInteger(writer: std.io.AnyWriter, specifier: Specifier, written_characters: *usize, value: FmtInteger, symbols: []const u8) !void {
+    const base = symbols.len;
+    std.debug.assert(base > 1);
+    const value_absolute = @abs(value);
+    const value_digits = std.math.log(FmtUnsignedInteger, base, value_absolute) + 1;
+    const sign_char = specifier.getSign(value);
+    const value_length = value_digits + @intFromBool(sign_char != null);
+    const padding_length =
+        if (specifier.minimum_width == 0) 0
+        else if (value_length >= specifier.minimum_width) 0
+        else specifier.minimum_width - value_length;
+
+    if (sign_char != null and specifier.sign_position == .before_padding) {
+        try writer.writeByte(sign_char.?);
+        written_characters.* += 1;
+    }
+    if (specifier.allign == .right) {
+        try writer.writeByteNTimes(specifier.pad_char, padding_length);
+        written_characters.* += padding_length;
+    }
+    if (sign_char != null and specifier.sign_position == .after_padding) {
+        try writer.writeByte(sign_char.?);
+        written_characters.* += 1;
+    }
+    var digit = value_digits - 1;
+    var value_left = value_absolute;
+    while (true) {
+        const power = @abs(std.math.pow(FmtInteger, @intCast(base), @intCast(digit)));
+        const factor = @abs(@divTrunc(value_left, power));
+        try writer.writeByte(symbols[factor]);
+        written_characters.* += 1;
+        value_left %= power;
+        if (digit == 0) break;
+        digit -= 1;
+    }
+    if (specifier.allign == .left) {
+        try writer.writeByteNTimes(specifier.pad_char, padding_length);
+        written_characters.* += padding_length;
+    }
+}
+
 const Specifier = struct {
     allign: enum { left, right },
     sign: enum { negative_only, always, force_space },
+    sign_position: enum { before_padding, after_padding },
     pad_char: u8,
 
     /// 0 implies no minimum width set
@@ -192,5 +244,75 @@ const ArgsField = union (enum) {
     usize_ptr: *usize,
     generic_ptr: *anyopaque,
 };
-pub const FormatError = error {
-};
+
+// the below code is basically just copied from zig's standard library
+pub const BufPrintError = std.fmt.BufPrintError;
+/// Print a Formatter string into `buf`. Actually just a thin wrapper around `format` and `fixedBufferStream`.
+/// Returns a slice of the bytes printed to.
+pub fn bufPrint(buf: []u8, fmt: []const u8, args: anytype) BufPrintError![]u8 {
+    var fbs = std.io.fixedBufferStream(buf);
+    format(fbs.writer().any(), fmt, args) catch |err| switch (err) {
+        error.NoSpaceLeft => return BufPrintError.NoSpaceLeft,
+        else => unreachable,
+    };
+    return fbs.getWritten();
+}
+
+test "Echoing" {
+    var buf: [256]u8 = undefined;
+
+    try std.testing.expectEqualStrings("Hello World!", try bufPrint(&buf, "Hello World!", .{}));
+    try std.testing.expectEqualStrings("Foxes are cute, aren't they ?:3", try bufPrint(&buf, "Foxes are cute, aren't they ?:3", .{}));
+    try std.testing.expectEqualStrings("meow\n", try bufPrint(&buf, "meow\n", .{}));
+}
+test "% escaping" {
+    var buf: [256]u8 = undefined;
+
+    try std.testing.expectEqualStrings("%", try bufPrint(&buf, "%%", .{}));
+    try std.testing.expectEqualStrings("100%", try bufPrint(&buf, "100%%", .{}));
+    try std.testing.expectEqualStrings("%rax", try bufPrint(&buf, "%%rax", .{}));
+}
+test "Integer formatting" {
+    var buf: [256]u8 = undefined;
+
+    try std.testing.expectEqualStrings("128", try bufPrint(&buf, "%i", .{128}));
+    try std.testing.expectEqualStrings("128", try bufPrint(&buf, "%d", .{128}));
+    try std.testing.expectEqualStrings("128", try bufPrint(&buf, "%u", .{128}));
+    try std.testing.expectEqualStrings("10000000", try bufPrint(&buf, "%b", .{128}));
+    try std.testing.expectEqualStrings("200", try bufPrint(&buf, "%o", .{128}));
+    try std.testing.expectEqualStrings("8a", try bufPrint(&buf, "%x", .{138}));
+    try std.testing.expectEqualStrings("8A", try bufPrint(&buf, "%X", .{138}));
+
+    try std.testing.expectEqualStrings("-184", try bufPrint(&buf, "%i", .{-184}));
+    try std.testing.expectEqualStrings("-184", try bufPrint(&buf, "% i", .{-184}));
+    try std.testing.expectEqualStrings("-184", try bufPrint(&buf, "%+i", .{-184}));
+    try std.testing.expectEqualStrings("184", try bufPrint(&buf, "%i", .{184}));
+    try std.testing.expectEqualStrings(" 184", try bufPrint(&buf, "% i", .{184}));
+    try std.testing.expectEqualStrings("+184", try bufPrint(&buf, "%+i", .{184}));
+}
+test "Integer padding" {
+    var buf: [256]u8 = undefined;
+
+    try std.testing.expectEqualStrings("   16", try bufPrint(&buf, "%5i", .{16}));
+    try std.testing.expectEqualStrings("  +16", try bufPrint(&buf, "%+5i", .{16}));
+    try std.testing.expectEqualStrings("   16", try bufPrint(&buf, "% 5i", .{16}));
+    try std.testing.expectEqualStrings("  -16", try bufPrint(&buf, "% 5i", .{-16}));
+    try std.testing.expectEqualStrings("-  16", try bufPrint(&buf, "%< 5i", .{-16}));
+    try std.testing.expectEqualStrings("16   ", try bufPrint(&buf, "%-5i", .{16}));
+    try std.testing.expectEqualStrings("[   16] : [+32  ]", try bufPrint(&buf, "[%5i] : [%+-5i]", .{16, 32}));
+    try std.testing.expectEqualStrings("16", try bufPrint(&buf, "%1i", .{16}));
+    try std.testing.expectEqualStrings("16", try bufPrint(&buf, "%2i", .{16}));
+    try std.testing.expectEqualStrings("2905", try bufPrint(&buf, "%2i", .{2905}));
+
+    try std.testing.expectEqualStrings("00256", try bufPrint(&buf, "%05i", .{256}));
+    try std.testing.expectEqualStrings("0-256", try bufPrint(&buf, "%05i", .{-256}));
+    try std.testing.expectEqualStrings("0+256", try bufPrint(&buf, "%0+5i", .{256}));
+    try std.testing.expectEqualStrings("-0256", try bufPrint(&buf, "%0 <5i", .{-256}));
+    try std.testing.expectEqualStrings(" 0256", try bufPrint(&buf, "%0 <5i", .{256}));
+}
+test "bufPrint() error.NoSpaceLeft" {
+    var buf: [16]u8 = undefined;
+
+    try std.testing.expectError(BufPrintError.NoSpaceLeft, bufPrint(&buf, "0123456789ABCDEFG", .{}));
+    try std.testing.expectError(BufPrintError.NoSpaceLeft, bufPrint(&buf, "%i %i %i", .{12345, 67890, 12345}));
+}
