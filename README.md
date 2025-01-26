@@ -89,6 +89,10 @@ If it's a string, precision defines the maximum amount of characters written.
 When truncation happens, the last characters are cut off.
 <!-- maybe making precision negative could make it truncate the first characters instead? -->
 
+If it's a character, it will be repeated *precision* times.
+Does it make sense to call that precision? No.
+Could it still be a useful functionality? Yes.
+
 For any other type, precision doesn't do anything.
 
 To set the precision, a `.` followed by a number or a `*` is used, similar to [minimum width](#minimum-width) except with a `.` character. <br/>

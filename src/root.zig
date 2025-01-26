@@ -177,6 +177,13 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
                 const value = args_array[arguments_read].string;
                 try formatString(writer, specifier, &written_characters, value);
             },
+            'c' => { // character, the reason this isnt just a writer.writeByte() is cause of padding and precision
+                std.debug.assert(arguments_read < args_array.len);
+                std.debug.assert(args_array[arguments_read] == .integer);
+                std.debug.assert(args_array[arguments_read].integer < 0x100);
+                const value: u8 = @intCast(args_array[arguments_read].integer);
+                try formatCharacter(writer, specifier, &written_characters, value);
+            },
             else => unreachable,
         }
         arguments_read += 1;
@@ -190,11 +197,7 @@ fn formatInteger(writer: std.io.AnyWriter, specifier: Specifier, written_charact
     const value_digits = std.math.log(FmtUnsignedInteger, base, value_absolute) + 1;
     const sign_char = specifier.getSign(value);
     const value_length = value_digits + @intFromBool(sign_char != null);
-    // zig fmt: off
-    const padding_length =
-        if (value_length >= specifier.minimum_width) 0
-        else specifier.minimum_width - value_length;
-    // zig fmt: on
+    const padding_length = specifier.minimum_width -| value_length;
 
     if (sign_char != null and specifier.sign_position == .before_padding) {
         try writer.writeByte(sign_char.?);
@@ -229,10 +232,8 @@ fn formatString(writer: std.io.AnyWriter, specifier: Specifier, written_characte
     const value_length =
         if (specifier.precision) |precision| @min(value.len, precision)
         else value.len;
-    const padding_length =
-        if (value_length >= specifier.minimum_width) 0
-        else specifier.minimum_width - value_length;
     // zig fmt: on
+    const padding_length = specifier.minimum_width -| value_length;
 
     if (specifier.allign == .right) {
         try writer.writeByteNTimes(specifier.pad_char, padding_length);
@@ -242,6 +243,21 @@ fn formatString(writer: std.io.AnyWriter, specifier: Specifier, written_characte
         try writer.writeByte(value[i]);
         written_characters.* += 1;
     }
+    if (specifier.allign == .left) {
+        try writer.writeByteNTimes(specifier.pad_char, padding_length);
+        written_characters.* += padding_length;
+    }
+}
+fn formatCharacter(writer: std.io.AnyWriter, specifier: Specifier, written_characters: *usize, value: u8) !void {
+    const value_length = if (specifier.precision) |p| p else 1;
+    const padding_length = specifier.minimum_width -| value_length;
+
+    if (specifier.allign == .right) {
+        try writer.writeByteNTimes(specifier.pad_char, padding_length);
+        written_characters.* += padding_length;
+    }
+    try writer.writeByteNTimes(value, value_length);
+    written_characters.* += value_length;
     if (specifier.allign == .left) {
         try writer.writeByteNTimes(specifier.pad_char, padding_length);
         written_characters.* += padding_length;
@@ -355,12 +371,26 @@ test "String formatting" {
     try std.testing.expectEqualStrings("   :3", try bufPrint(&buf, "%5s", .{":3"}));
     try std.testing.expectEqualStrings("000:3", try bufPrint(&buf, "%05s", .{":3"}));
     try std.testing.expectEqualStrings(":3   ", try bufPrint(&buf, "%-5s", .{":3"}));
-    try std.testing.expectEqualStrings("[uwu]", try bufPrint(&buf, "[%*s]", .{2, "uwu"}));
+    try std.testing.expectEqualStrings("[uwu]", try bufPrint(&buf, "[%*s]", .{ 2, "uwu" }));
 
     try std.testing.expectEqualStrings("hell", try bufPrint(&buf, "%.4s", .{"hello"}));
     try std.testing.expectEqualStrings(" hello", try bufPrint(&buf, "%6.5s", .{"hello"}));
     try std.testing.expectEqualStrings("he  ", try bufPrint(&buf, "%-4.2s", .{"hello"}));
-    try std.testing.expectEqualStrings("hel", try bufPrint(&buf, "%.*s", .{3, "hello"}));
+    try std.testing.expectEqualStrings("hel", try bufPrint(&buf, "%.*s", .{ 3, "hello" }));
+}
+test "Character formatting" {
+    var buf: [256]u8 = undefined;
+
+    try std.testing.expectEqualStrings("c", try bufPrint(&buf, "%c", .{'c'}));
+    try std.testing.expectEqualStrings("4", try bufPrint(&buf, "%c", .{'4'}));
+
+    try std.testing.expectEqualStrings("  ;3", try bufPrint(&buf, "%3c%c", .{ ';', '3' }));
+    try std.testing.expectEqualStrings(";3  ", try bufPrint(&buf, "%c%-*c", .{ ';', 3, '3' }));
+    try std.testing.expectEqualStrings(":0", try bufPrint(&buf, "%0-2c", .{':'}));
+
+    try std.testing.expectEqualStrings("mmmmm", try bufPrint(&buf, "%.5c", .{'m'}));
+    try std.testing.expectEqualStrings("  mmmmm", try bufPrint(&buf, "%7.5c", .{'m'}));
+    try std.testing.expectEqualStrings("mmm", try bufPrint(&buf, "%*.*c", .{ 2, 3, 'm' }));
 }
 test "bufPrint() error.NoSpaceLeft" {
     var buf: [16]u8 = undefined;
