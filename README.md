@@ -13,6 +13,9 @@ I did design them to be as close as possible though, requiring little rethinking
 A lot of what's written here isn't implemented yet, I am working on it though. <!-- TODO: remove once everything is implemented -->
 Also any ideas are appreciated, making this more feature rich would be nice :3
 
+Also also, I will add a `build.zig.zon` once this can be reasonably used as a library.
+Might even make it so you can compile it to a static/dynamic library to use with other languages.
+
 ## Format specifier
 
 Format specifiers in `cfmt` look something like this:
