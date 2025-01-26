@@ -114,7 +114,7 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
                 std.debug.assert(arguments_read < args_array.len);
                 std.debug.assert(args_array[arguments_read] == .integer);
                 std.debug.assert(args_array[arguments_read].integer >= 0);
-                specifier.minimum_width = @intCast(args_array[arguments_read].integer);
+                specifier.precision = @intCast(args_array[arguments_read].integer);
                 arguments_read += 1;
                 i += 1;
             } else if (std.ascii.isDigit(fmt[i])) {
@@ -171,6 +171,12 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
                     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
                 });
             },
+            's' => { // string
+                std.debug.assert(arguments_read < args_array.len);
+                std.debug.assert(args_array[arguments_read] == .string);
+                const value = args_array[arguments_read].string;
+                try formatString(writer, specifier, &written_characters, value);
+            },
             else => unreachable,
         }
         arguments_read += 1;
@@ -186,8 +192,7 @@ fn formatInteger(writer: std.io.AnyWriter, specifier: Specifier, written_charact
     const value_length = value_digits + @intFromBool(sign_char != null);
     // zig fmt: off
     const padding_length =
-        if (specifier.minimum_width == 0) 0
-        else if (value_length >= specifier.minimum_width) 0
+        if (value_length >= specifier.minimum_width) 0
         else specifier.minimum_width - value_length;
     // zig fmt: on
 
@@ -213,6 +218,29 @@ fn formatInteger(writer: std.io.AnyWriter, specifier: Specifier, written_charact
         value_left %= power;
         if (digit == 0) break;
         digit -= 1;
+    }
+    if (specifier.allign == .left) {
+        try writer.writeByteNTimes(specifier.pad_char, padding_length);
+        written_characters.* += padding_length;
+    }
+}
+fn formatString(writer: std.io.AnyWriter, specifier: Specifier, written_characters: *usize, value: []const u8) !void {
+    // zig fmt: off
+    const value_length =
+        if (specifier.precision) |precision| @min(value.len, precision)
+        else value.len;
+    const padding_length =
+        if (value_length >= specifier.minimum_width) 0
+        else specifier.minimum_width - value_length;
+    // zig fmt: on
+
+    if (specifier.allign == .right) {
+        try writer.writeByteNTimes(specifier.pad_char, padding_length);
+        written_characters.* += padding_length;
+    }
+    for (0..value_length) |i| {
+        try writer.writeByte(value[i]);
+        written_characters.* += 1;
     }
     if (specifier.allign == .left) {
         try writer.writeByteNTimes(specifier.pad_char, padding_length);
@@ -317,6 +345,22 @@ test "Integer padding" {
     try std.testing.expectEqualStrings("   -33", try bufPrint(&buf, "% *i", .{ 6, -33 }));
     try std.testing.expectEqualStrings(" 0033", try bufPrint(&buf, "%<0 *i", .{ 5, 33 }));
     try std.testing.expectEqualStrings("33      ", try bufPrint(&buf, "%-*i", .{ 8, 33 }));
+}
+test "String formatting" {
+    var buf: [256]u8 = undefined;
+
+    try std.testing.expectEqualStrings("Hello World!", try bufPrint(&buf, "Hello %s!", .{"World"}));
+    try std.testing.expectEqualStrings("do not  the cat", try bufPrint(&buf, "do not %s the cat", .{""}));
+
+    try std.testing.expectEqualStrings("   :3", try bufPrint(&buf, "%5s", .{":3"}));
+    try std.testing.expectEqualStrings("000:3", try bufPrint(&buf, "%05s", .{":3"}));
+    try std.testing.expectEqualStrings(":3   ", try bufPrint(&buf, "%-5s", .{":3"}));
+    try std.testing.expectEqualStrings("[uwu]", try bufPrint(&buf, "[%*s]", .{2, "uwu"}));
+
+    try std.testing.expectEqualStrings("hell", try bufPrint(&buf, "%.4s", .{"hello"}));
+    try std.testing.expectEqualStrings(" hello", try bufPrint(&buf, "%6.5s", .{"hello"}));
+    try std.testing.expectEqualStrings("he  ", try bufPrint(&buf, "%-4.2s", .{"hello"}));
+    try std.testing.expectEqualStrings("hel", try bufPrint(&buf, "%.*s", .{3, "hello"}));
 }
 test "bufPrint() error.NoSpaceLeft" {
     var buf: [16]u8 = undefined;
