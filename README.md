@@ -53,6 +53,7 @@ The following specifiers exist:
 - `s`: String
 - `c`: Character
 - `p`: Pointer
+- `B`: Boolean (`"true"` or `"false"`)
 
 **Special:**
 <br/> \*cricket noises\*
@@ -65,7 +66,7 @@ For better compatibility with c's format specifiers, `d` and `u` work the same a
 If a minimum width is specified and the formatted string isn't that long, the string will be padded with space characters.
 
 The minimum width can either be a decimal number, such as `4`, `9` or `142`,
-or a `*`, in which case an unsigned integer is read from the arguments and its value is used as the minimum width. <br/>
+or a `*`, in which case an `usize` is read from the arguments and its value is used as the minimum width. <br/>
 If a `*` is used, the dynamic minimum width must be given before the value to be formatted (and the dynamic precision if used). <br/>
 Please note that the decimal number may not have a leading zero as that could interfere with the [`0` flag](#flags).
 
@@ -90,7 +91,8 @@ When truncation happens, the last characters are cut off.
 For any other type, precision doesn't do anything.
 
 To set the precision, a `.` followed by a number or a `*` is used, similar to [minimum width](#minimum-width) except with a `.` character. <br/>
-Here however, the precision is put *between* the dynamic minimum width and value to be formatted.
+Here however, the precision is put *between* the dynamic minimum width and value to be formatted. <br/>
+If neither a `*` or a number follows the `.`, precision is set to `0`.
 
 ### Flags
 
