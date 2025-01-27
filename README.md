@@ -58,7 +58,8 @@ The following specifiers exist:
 **Other:**
 - `s`: String
 - `c`: Character
-- `p`: Pointer
+- `p`: Pointer (hexadecimal lowercase)
+- `P`: Pointer (hexadecimal uppercase)
 <!-- - `B`: Boolean (`"true"` or `"false"`) -->
 
 **Special:**

@@ -130,9 +130,9 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
         }
 
         // write contents
+        std.debug.assert(arguments_read < args_array.len);
         switch (fmt[i]) {
             'i', 'd', 'u' => { // decimal integer
-                std.debug.assert(arguments_read < args_array.len);
                 std.debug.assert(args_array[arguments_read] == .integer);
                 const value = args_array[arguments_read].integer;
                 try formatInteger(writer, specifier, &written_characters, value, &[_]u8{
@@ -140,7 +140,6 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
                 });
             },
             'b' => { // binary integer
-                std.debug.assert(arguments_read < args_array.len);
                 std.debug.assert(args_array[arguments_read] == .integer);
                 const value = args_array[arguments_read].integer;
                 try formatInteger(writer, specifier, &written_characters, value, &[_]u8{
@@ -148,7 +147,6 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
                 });
             },
             'o' => { // octal integer
-                std.debug.assert(arguments_read < args_array.len);
                 std.debug.assert(args_array[arguments_read] == .integer);
                 const value = args_array[arguments_read].integer;
                 try formatInteger(writer, specifier, &written_characters, value, &[_]u8{
@@ -156,7 +154,6 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
                 });
             },
             'x' => { // hexadecimal integer (lowercase)
-                std.debug.assert(arguments_read < args_array.len);
                 std.debug.assert(args_array[arguments_read] == .integer);
                 const value = args_array[arguments_read].integer;
                 try formatInteger(writer, specifier, &written_characters, value, &[_]u8{
@@ -164,7 +161,6 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
                 });
             },
             'X' => { // hexadecimal integer (lowercase)
-                std.debug.assert(arguments_read < args_array.len);
                 std.debug.assert(args_array[arguments_read] == .integer);
                 const value = args_array[arguments_read].integer;
                 try formatInteger(writer, specifier, &written_characters, value, &[_]u8{
@@ -172,17 +168,37 @@ pub fn format(writer: std.io.AnyWriter, fmt: []const u8, args: anytype) !void {
                 });
             },
             's' => { // string
-                std.debug.assert(arguments_read < args_array.len);
                 std.debug.assert(args_array[arguments_read] == .string);
                 const value = args_array[arguments_read].string;
                 try formatString(writer, specifier, &written_characters, value);
             },
             'c' => { // character, the reason this isnt just a writer.writeByte() is cause of padding and precision
-                std.debug.assert(arguments_read < args_array.len);
                 std.debug.assert(args_array[arguments_read] == .integer);
                 std.debug.assert(args_array[arguments_read].integer < 0x100);
                 const value: u8 = @intCast(args_array[arguments_read].integer);
                 try formatCharacter(writer, specifier, &written_characters, value);
+            },
+            'p' => { // pointer (lowercase)
+                // zig fmt: off
+                const value: usize =
+                    if (args_array[arguments_read] == .generic_ptr) @intFromPtr(args_array[arguments_read].generic_ptr)
+                    else if (args_array[arguments_read] == .usize_ptr) @intFromPtr(args_array[arguments_read].usize_ptr)
+                    else unreachable; // doing this instead of an assert here cause its less code
+                // zig fmt: on
+                try formatPointer(writer, specifier, &written_characters, value, [16]u8{
+                    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+                });
+            },
+            'P' => { // pointer (uppercase)
+                // zig fmt: off
+                const value: usize =
+                    if (args_array[arguments_read] == .generic_ptr) @intFromPtr(args_array[arguments_read].generic_ptr)
+                    else if (args_array[arguments_read] == .usize_ptr) @intFromPtr(args_array[arguments_read].usize_ptr)
+                    else unreachable; // doing this instead of an assert here cause its less code
+                // zig fmt: on
+                try formatPointer(writer, specifier, &written_characters, value, [16]u8{
+                    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
+                });
             },
             else => unreachable,
         }
@@ -216,6 +232,29 @@ fn formatInteger(writer: std.io.AnyWriter, specifier: Specifier, written_charact
     while (true) {
         const power = @abs(std.math.pow(FmtInteger, @intCast(base), @intCast(digit)));
         const factor = @abs(@divTrunc(value_left, power));
+        try writer.writeByte(symbols[factor]);
+        written_characters.* += 1;
+        value_left %= power;
+        if (digit == 0) break;
+        digit -= 1;
+    }
+    if (specifier.allign == .left) {
+        try writer.writeByteNTimes(specifier.pad_char, padding_length);
+        written_characters.* += padding_length;
+    }
+}
+fn formatPointer(writer: std.io.AnyWriter, specifier: Specifier, written_characters: *usize, value: usize, symbols: [16]u8) !void {
+    const value_digits: usize = @typeInfo(usize).Int.bits / 4;
+    const padding_length = specifier.minimum_width -| value_digits;
+    if (specifier.allign == .right) {
+        try writer.writeByteNTimes(specifier.pad_char, padding_length);
+        written_characters.* += padding_length;
+    }
+    var digit = value_digits - 1;
+    var value_left = value;
+    while (true) {
+        const power = std.math.pow(usize, 16, digit);
+        const factor = value_left / power;
         try writer.writeByte(symbols[factor]);
         written_characters.* += 1;
         value_left %= power;
@@ -305,92 +344,103 @@ pub fn bufPrint(buf: []u8, fmt: []const u8, args: anytype) BufPrintError![]u8 {
     return fbs.getWritten();
 }
 
+const expectEqualStrings = std.testing.expectEqualStrings;
 test "Echoing" {
     var buf: [256]u8 = undefined;
 
-    try std.testing.expectEqualStrings("Hello World!", try bufPrint(&buf, "Hello World!", .{}));
-    try std.testing.expectEqualStrings("Foxes are cute, aren't they ?:3", try bufPrint(&buf, "Foxes are cute, aren't they ?:3", .{}));
-    try std.testing.expectEqualStrings("meow\n", try bufPrint(&buf, "meow\n", .{}));
+    try expectEqualStrings("Hello World!", try bufPrint(&buf, "Hello World!", .{}));
+    try expectEqualStrings("Foxes are cute, aren't they ?:3", try bufPrint(&buf, "Foxes are cute, aren't they ?:3", .{}));
+    try expectEqualStrings("meow\n", try bufPrint(&buf, "meow\n", .{}));
 }
 test "% escaping" {
     var buf: [256]u8 = undefined;
 
-    try std.testing.expectEqualStrings("%", try bufPrint(&buf, "%%", .{}));
-    try std.testing.expectEqualStrings("100%", try bufPrint(&buf, "100%%", .{}));
-    try std.testing.expectEqualStrings("%rax", try bufPrint(&buf, "%%rax", .{}));
+    try expectEqualStrings("%", try bufPrint(&buf, "%%", .{}));
+    try expectEqualStrings("100%", try bufPrint(&buf, "100%%", .{}));
+    try expectEqualStrings("%rax", try bufPrint(&buf, "%%rax", .{}));
 }
 test "Integer formatting" {
     var buf: [256]u8 = undefined;
 
-    try std.testing.expectEqualStrings("128", try bufPrint(&buf, "%i", .{128}));
-    try std.testing.expectEqualStrings("128", try bufPrint(&buf, "%d", .{128}));
-    try std.testing.expectEqualStrings("128", try bufPrint(&buf, "%u", .{128}));
-    try std.testing.expectEqualStrings("10000000", try bufPrint(&buf, "%b", .{128}));
-    try std.testing.expectEqualStrings("200", try bufPrint(&buf, "%o", .{128}));
-    try std.testing.expectEqualStrings("8a", try bufPrint(&buf, "%x", .{138}));
-    try std.testing.expectEqualStrings("8A", try bufPrint(&buf, "%X", .{138}));
+    try expectEqualStrings("128", try bufPrint(&buf, "%i", .{128}));
+    try expectEqualStrings("128", try bufPrint(&buf, "%d", .{128}));
+    try expectEqualStrings("128", try bufPrint(&buf, "%u", .{128}));
+    try expectEqualStrings("10000000", try bufPrint(&buf, "%b", .{128}));
+    try expectEqualStrings("200", try bufPrint(&buf, "%o", .{128}));
+    try expectEqualStrings("8a", try bufPrint(&buf, "%x", .{138}));
+    try expectEqualStrings("8A", try bufPrint(&buf, "%X", .{138}));
 
-    try std.testing.expectEqualStrings("-184", try bufPrint(&buf, "%i", .{-184}));
-    try std.testing.expectEqualStrings("-184", try bufPrint(&buf, "% i", .{-184}));
-    try std.testing.expectEqualStrings("-184", try bufPrint(&buf, "%+i", .{-184}));
-    try std.testing.expectEqualStrings("184", try bufPrint(&buf, "%i", .{184}));
-    try std.testing.expectEqualStrings(" 184", try bufPrint(&buf, "% i", .{184}));
-    try std.testing.expectEqualStrings("+184", try bufPrint(&buf, "%+i", .{184}));
+    try expectEqualStrings("-184", try bufPrint(&buf, "%i", .{-184}));
+    try expectEqualStrings("-184", try bufPrint(&buf, "% i", .{-184}));
+    try expectEqualStrings("-184", try bufPrint(&buf, "%+i", .{-184}));
+    try expectEqualStrings("184", try bufPrint(&buf, "%i", .{184}));
+    try expectEqualStrings(" 184", try bufPrint(&buf, "% i", .{184}));
+    try expectEqualStrings("+184", try bufPrint(&buf, "%+i", .{184}));
 }
 test "Integer padding" {
     var buf: [256]u8 = undefined;
 
-    try std.testing.expectEqualStrings("   16", try bufPrint(&buf, "%5i", .{16}));
-    try std.testing.expectEqualStrings("  +16", try bufPrint(&buf, "%+5i", .{16}));
-    try std.testing.expectEqualStrings("   16", try bufPrint(&buf, "% 5i", .{16}));
-    try std.testing.expectEqualStrings("  -16", try bufPrint(&buf, "% 5i", .{-16}));
-    try std.testing.expectEqualStrings("-  16", try bufPrint(&buf, "%< 5i", .{-16}));
-    try std.testing.expectEqualStrings("16   ", try bufPrint(&buf, "%-5i", .{16}));
-    try std.testing.expectEqualStrings("[   16] : [+32  ]", try bufPrint(&buf, "[%5i] : [%+-5i]", .{ 16, 32 }));
-    try std.testing.expectEqualStrings("16", try bufPrint(&buf, "%1i", .{16}));
-    try std.testing.expectEqualStrings("16", try bufPrint(&buf, "%2i", .{16}));
-    try std.testing.expectEqualStrings("2905", try bufPrint(&buf, "%2i", .{2905}));
+    try expectEqualStrings("   16", try bufPrint(&buf, "%5i", .{16}));
+    try expectEqualStrings("  +16", try bufPrint(&buf, "%+5i", .{16}));
+    try expectEqualStrings("   16", try bufPrint(&buf, "% 5i", .{16}));
+    try expectEqualStrings("  -16", try bufPrint(&buf, "% 5i", .{-16}));
+    try expectEqualStrings("-  16", try bufPrint(&buf, "%< 5i", .{-16}));
+    try expectEqualStrings("16   ", try bufPrint(&buf, "%-5i", .{16}));
+    try expectEqualStrings("[   16] : [+32  ]", try bufPrint(&buf, "[%5i] : [%+-5i]", .{ 16, 32 }));
+    try expectEqualStrings("16", try bufPrint(&buf, "%1i", .{16}));
+    try expectEqualStrings("16", try bufPrint(&buf, "%2i", .{16}));
+    try expectEqualStrings("2905", try bufPrint(&buf, "%2i", .{2905}));
 
-    try std.testing.expectEqualStrings("00256", try bufPrint(&buf, "%05i", .{256}));
-    try std.testing.expectEqualStrings("0-256", try bufPrint(&buf, "%05i", .{-256}));
-    try std.testing.expectEqualStrings("0+256", try bufPrint(&buf, "%0+5i", .{256}));
-    try std.testing.expectEqualStrings("-0256", try bufPrint(&buf, "%0 <5i", .{-256}));
-    try std.testing.expectEqualStrings(" 0256", try bufPrint(&buf, "%0 <5i", .{256}));
+    try expectEqualStrings("00256", try bufPrint(&buf, "%05i", .{256}));
+    try expectEqualStrings("0-256", try bufPrint(&buf, "%05i", .{-256}));
+    try expectEqualStrings("0+256", try bufPrint(&buf, "%0+5i", .{256}));
+    try expectEqualStrings("-0256", try bufPrint(&buf, "%0 <5i", .{-256}));
+    try expectEqualStrings(" 0256", try bufPrint(&buf, "%0 <5i", .{256}));
 
-    try std.testing.expectEqualStrings("  33", try bufPrint(&buf, "%*i", .{ 4, 33 }));
-    try std.testing.expectEqualStrings("   -33", try bufPrint(&buf, "% *i", .{ 6, -33 }));
-    try std.testing.expectEqualStrings(" 0033", try bufPrint(&buf, "%<0 *i", .{ 5, 33 }));
-    try std.testing.expectEqualStrings("33      ", try bufPrint(&buf, "%-*i", .{ 8, 33 }));
+    try expectEqualStrings("  33", try bufPrint(&buf, "%*i", .{ 4, 33 }));
+    try expectEqualStrings("   -33", try bufPrint(&buf, "% *i", .{ 6, -33 }));
+    try expectEqualStrings(" 0033", try bufPrint(&buf, "%<0 *i", .{ 5, 33 }));
+    try expectEqualStrings("33      ", try bufPrint(&buf, "%-*i", .{ 8, 33 }));
 }
 test "String formatting" {
     var buf: [256]u8 = undefined;
 
-    try std.testing.expectEqualStrings("Hello World!", try bufPrint(&buf, "Hello %s!", .{"World"}));
-    try std.testing.expectEqualStrings("do not  the cat", try bufPrint(&buf, "do not %s the cat", .{""}));
+    try expectEqualStrings("Hello World!", try bufPrint(&buf, "Hello %s!", .{"World"}));
+    try expectEqualStrings("do not  the cat", try bufPrint(&buf, "do not %s the cat", .{""}));
 
-    try std.testing.expectEqualStrings("   :3", try bufPrint(&buf, "%5s", .{":3"}));
-    try std.testing.expectEqualStrings("000:3", try bufPrint(&buf, "%05s", .{":3"}));
-    try std.testing.expectEqualStrings(":3   ", try bufPrint(&buf, "%-5s", .{":3"}));
-    try std.testing.expectEqualStrings("[uwu]", try bufPrint(&buf, "[%*s]", .{ 2, "uwu" }));
+    try expectEqualStrings("   :3", try bufPrint(&buf, "%5s", .{":3"}));
+    try expectEqualStrings("000:3", try bufPrint(&buf, "%05s", .{":3"}));
+    try expectEqualStrings(":3   ", try bufPrint(&buf, "%-5s", .{":3"}));
+    try expectEqualStrings("[uwu]", try bufPrint(&buf, "[%*s]", .{ 2, "uwu" }));
 
-    try std.testing.expectEqualStrings("hell", try bufPrint(&buf, "%.4s", .{"hello"}));
-    try std.testing.expectEqualStrings(" hello", try bufPrint(&buf, "%6.5s", .{"hello"}));
-    try std.testing.expectEqualStrings("he  ", try bufPrint(&buf, "%-4.2s", .{"hello"}));
-    try std.testing.expectEqualStrings("hel", try bufPrint(&buf, "%.*s", .{ 3, "hello" }));
+    try expectEqualStrings("hell", try bufPrint(&buf, "%.4s", .{"hello"}));
+    try expectEqualStrings(" hello", try bufPrint(&buf, "%6.5s", .{"hello"}));
+    try expectEqualStrings("he  ", try bufPrint(&buf, "%-4.2s", .{"hello"}));
+    try expectEqualStrings("hel", try bufPrint(&buf, "%.*s", .{ 3, "hello" }));
 }
 test "Character formatting" {
     var buf: [256]u8 = undefined;
 
-    try std.testing.expectEqualStrings("c", try bufPrint(&buf, "%c", .{'c'}));
-    try std.testing.expectEqualStrings("4", try bufPrint(&buf, "%c", .{'4'}));
+    try expectEqualStrings("c", try bufPrint(&buf, "%c", .{'c'}));
+    try expectEqualStrings("4", try bufPrint(&buf, "%c", .{'4'}));
 
-    try std.testing.expectEqualStrings("  ;3", try bufPrint(&buf, "%3c%c", .{ ';', '3' }));
-    try std.testing.expectEqualStrings(";3  ", try bufPrint(&buf, "%c%-*c", .{ ';', 3, '3' }));
-    try std.testing.expectEqualStrings(":0", try bufPrint(&buf, "%0-2c", .{':'}));
+    try expectEqualStrings("  ;3", try bufPrint(&buf, "%3c%c", .{ ';', '3' }));
+    try expectEqualStrings(";3  ", try bufPrint(&buf, "%c%-*c", .{ ';', 3, '3' }));
+    try expectEqualStrings(":0", try bufPrint(&buf, "%0-2c", .{':'}));
 
-    try std.testing.expectEqualStrings("mmmmm", try bufPrint(&buf, "%.5c", .{'m'}));
-    try std.testing.expectEqualStrings("  mmmmm", try bufPrint(&buf, "%7.5c", .{'m'}));
-    try std.testing.expectEqualStrings("mmm", try bufPrint(&buf, "%*.*c", .{ 2, 3, 'm' }));
+    try expectEqualStrings("mmmmm", try bufPrint(&buf, "%.5c", .{'m'}));
+    try expectEqualStrings("  mmmmm", try bufPrint(&buf, "%7.5c", .{'m'}));
+    try expectEqualStrings("mmm", try bufPrint(&buf, "%*.*c", .{ 2, 3, 'm' }));
+}
+test "Pointer formatting" {
+    var buf: [256]u8 = undefined;
+    if (@typeInfo(usize).Int.bits != 64) return error.SkipZigTest;
+
+    try expectEqualStrings("0x0000000000000001", try bufPrint(&buf, "0x%p", .{@as(*anyopaque, @ptrFromInt(0x0000000000000001))}));
+    try expectEqualStrings("0x1234567890abcdef", try bufPrint(&buf, "0x%p", .{@as(*anyopaque, @ptrFromInt(0x1234567890ABCDEF))}));
+    try expectEqualStrings("0x1234567890ABCDEF", try bufPrint(&buf, "0x%P", .{@as(*anyopaque, @ptrFromInt(0x1234567890ABCDEF))}));
+
+    try expectEqualStrings("[  10 : 00000000000000F0                 ]", try bufPrint(&buf, "[ %3X : %-32P ]", .{ 0x10, @as(*usize, @ptrFromInt(0xf0)) }));
 }
 test "bufPrint() error.NoSpaceLeft" {
     var buf: [16]u8 = undefined;
